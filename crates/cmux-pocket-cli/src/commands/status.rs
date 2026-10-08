@@ -51,6 +51,8 @@ pub struct GatewayStatus {
     pub server_version: Option<String>,
     pub capabilities: Vec<String>,
     pub backend_health: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     pub latency_ms: Option<u64>,
 }
 
@@ -176,6 +178,7 @@ pub async fn handle_status(
     let mut server_version = None;
     let mut capabilities = Vec::new();
     let mut backend_health = None;
+    let mut backend_error = None;
     let mut probe_latency = None;
 
     if listening && loaded_token.is_some() {
@@ -191,6 +194,7 @@ pub async fn handle_status(
             server_version = report.server_version;
             capabilities = report.capabilities;
             backend_health = report.backend_health;
+            backend_error = report.error;
             probe_latency = Some(report.latency_ms);
         }
     }
@@ -201,6 +205,7 @@ pub async fn handle_status(
         server_version: server_version.clone(),
         capabilities: capabilities.clone(),
         backend_health: backend_health.clone(),
+        error: backend_error.clone(),
         latency_ms: probe_latency,
     };
 
@@ -217,6 +222,8 @@ pub async fn handle_status(
     // 6. Compute overall status
     let overall_status = if !config_exists || !token_exists {
         "unconfigured".to_string()
+    } else if auth_probe_ok && backend_health.as_deref() != Some("healthy") {
+        "degraded (cmux workspace access unavailable)".to_string()
     } else if auth_probe_ok && ping_ok {
         "healthy".to_string()
     } else if auth_probe_ok && !ping_ok {
@@ -248,6 +255,7 @@ pub async fn handle_status(
          Launchd Service: {} (registered: {}, PID: {})\n\
          TCP Listener:    {}\n\
          Gateway Probe:   {} (version: {}, latency: {})\n\
+         Workspace Access: {}\n\
          cmux Reachable:  {} ({})\n\
          Capabilities:    {}",
         overall_status.to_uppercase(),
@@ -278,6 +286,11 @@ pub async fn handle_status(
         probe_latency
             .map(|ms| format!("{}ms", ms))
             .unwrap_or_else(|| "n/a".to_string()),
+        if auth_probe_ok && backend_health.as_deref() == Some("healthy") {
+            "Ready"
+        } else {
+            backend_error.as_deref().unwrap_or("Unavailable")
+        },
         if ping_ok {
             "Ready (ping OK)"
         } else {

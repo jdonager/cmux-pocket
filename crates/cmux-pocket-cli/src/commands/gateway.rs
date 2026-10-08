@@ -146,6 +146,17 @@ pub async fn handle_gateway(
             let report =
                 probe_gateway(&config.host, config.port, &token, DEFAULT_PROBE_TIMEOUT).await?;
 
+            if !report.is_backend_healthy() {
+                return Err(CliError::DependencyUnavailable(
+                    report.error.unwrap_or_else(|| {
+                        format!(
+                            "Gateway backend is {}",
+                            report.backend_health.as_deref().unwrap_or("unknown")
+                        )
+                    }),
+                ));
+            }
+
             let prose = format!(
                 "Gateway Probe: OK\nEndpoint: ws://{}:{}\nServer version: {}\nCapabilities: {}\nBackend health: {}\nLatency: {}ms",
                 report.host,
