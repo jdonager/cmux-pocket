@@ -160,6 +160,24 @@ fun CmuxApp(
     val activeSurfaces by viewModel.activeSurfaces.collectAsState()
     val selectedSurfaceId by viewModel.selectedSurfaceId.collectAsState()
 
+    val displaySurfaceId = selectedSurfaceId.orEmpty()
+    val displayPort = portInput.toIntOrNull() ?: 8088
+    val terminalDisplayState = remember(hostInput, displayPort, displaySurfaceId) {
+        mutableStateOf(settingsManager.terminalDisplay(hostInput, displayPort, displaySurfaceId, fontSizeSp))
+    }
+    var terminalDisplay by terminalDisplayState
+    // Persist the first view too, so changing another terminal's size does not change this one.
+    LaunchedEffect(hostInput, displayPort, displaySurfaceId, terminalDisplay) {
+        kotlinx.coroutines.delay(200)
+        settingsManager.saveTerminalDisplay(hostInput, displayPort, displaySurfaceId, terminalDisplay)
+    }
+    DisposableEffect(hostInput, displayPort, displaySurfaceId) {
+        onDispose {
+            settingsManager.saveTerminalDisplay(hostInput, displayPort, displaySurfaceId, terminalDisplayState.value)
+        }
+    }
+    val changeTerminalDisplay: (TerminalDisplayPreference) -> Unit = { terminalDisplay = it.normalized() }
+
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
@@ -223,7 +241,8 @@ fun CmuxApp(
                             surfaces = activeSurfaces,
                             activeScreenState = activeScreenState,
                             connectionStatus = status,
-                            userFontSizeSp = fontSizeSp,
+                            displayPreference = terminalDisplay,
+                            onDisplayPreferenceChange = changeTerminalDisplay,
                             themeHex = selectedThemeHex,
                             onTapCanvas = {
                                 terminalInputView?.requestKeyboard()
@@ -282,7 +301,8 @@ fun CmuxApp(
                         surfaces = activeSurfaces,
                         activeScreenState = activeScreenState,
                         connectionStatus = status,
-                        userFontSizeSp = fontSizeSp,
+                        displayPreference = terminalDisplay,
+                        onDisplayPreferenceChange = changeTerminalDisplay,
                         themeHex = selectedThemeHex,
                         onTapCanvas = {
                             terminalInputView?.requestKeyboard()
@@ -382,7 +402,7 @@ fun CmuxApp(
             hostInput = hostInput,
             portInput = portInput,
             tokenInput = tokenInput,
-            fontSizeSp = fontSizeSp,
+            fontSizeSp = terminalDisplay.fontSizeSp,
             selectedThemeHex = selectedThemeHex,
             themeMode = themeMode,
             connectionStatus = status,
@@ -393,7 +413,10 @@ fun CmuxApp(
             onHostChange = onHostChange,
             onPortChange = onPortChange,
             onTokenChange = onTokenChange,
-            onFontSizeChange = onFontSizeChange,
+            onFontSizeChange = {
+                onFontSizeChange(it)
+                changeTerminalDisplay(terminalDisplay.copy(fontSizeSp = it, fitWidth = false, panX = 0f, panY = null))
+            },
             onThemeChange = onThemeHexChange,
             onThemeModeChange = onThemeModeChange,
             onConnectClick = {

@@ -59,6 +59,8 @@ Use the built-in **USB** profile (`127.0.0.1:8088`) and the Gateway token. Re-ru
 
 The workspace picker and terminal tab bar are phone-local navigation. Selecting a Workspace or Tab does not move cmux's Mac-side focus.
 
+Terminals open at a readable text size. Use **A− / A+** below the terminal or pinch to adjust it, and two-finger drag to move around the view. **Fit Width** shows all columns; **Readable** returns to your chosen text size. Double-tap the canvas to fit its width. Each terminal remembers its text size and view across tab switches and app restarts. The font slider in **Settings → Display & Terminal** also adjusts the current terminal and sets the default for new terminals.
+
 ![cmux Pocket connection settings with a sanitized WSS-style endpoint](docs/assets/connection-settings.png)
 
 Connection profiles store the endpoint and token in encrypted Android preferences. Use a trusted TLS certificate and a strong random token; never put tokens, private domains, tunnel IDs, or personal paths in screenshots or bug reports.

@@ -27,7 +27,8 @@ fun TerminalStage(
     onTerminalScroll: (Double) -> Unit,
     onNewSurfaceClick: () -> Unit,
     modifier: Modifier = Modifier,
-    userFontSizeSp: Float = 14.5f,
+    displayPreference: TerminalDisplayPreference = TerminalDisplayPreference(),
+    onDisplayPreferenceChange: (TerminalDisplayPreference) -> Unit = {},
     themeHex: String = "#1E1E1E"
 ) {
     val theme = CmuxTheme.colors
@@ -95,7 +96,8 @@ fun TerminalStage(
                 screenState = activeScreenState,
                 onTap = onTapCanvas,
                 onTerminalScroll = onTerminalScroll,
-                userFontSizeSp = userFontSizeSp,
+                displayPreference = displayPreference,
+                onDisplayPreferenceChange = onDisplayPreferenceChange,
                 themeHex = themeHex,
                 modifier = Modifier.fillMaxSize()
             )

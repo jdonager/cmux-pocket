@@ -14,9 +14,6 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -77,7 +74,8 @@ internal data class TerminalGeometry(
     val rowHeight: Float,
     val baselineOffset: Float,
     val originX: Float,
-    val originY: Float
+    val originY: Float,
+    val fontSizePx: Float
 ) {
     fun cellToPoint(row: Int, column: Int): Offset {
         return Offset(
@@ -117,36 +115,45 @@ internal fun computeTerminalGeometry(
     canvasHeight: Float,
     sourceCols: Int,
     rows: Int,
-    scaleFactor: Float,
+    requestedFontSizePx: Float,
+    fitWidth: Boolean,
     panOffset: Offset,
+    focusRow: Int?,
     textPaint: Paint
 ): TerminalGeometry {
     val leftPaddingPx = 4f
     val rightPaddingPx = 4f
     val availableWidth = (canvasWidth - leftPaddingPx - rightPaddingPx).coerceAtLeast(10f)
 
-    val baseCellWidth = availableWidth / sourceCols.coerceAtLeast(1).toFloat()
-    val cellWidth = baseCellWidth * scaleFactor
+    textPaint.isFakeBoldText = false
+    textPaint.isUnderlineText = false
+    textPaint.textSize = 100f
+    val referenceAdvance = textPaint.measureText("M").coerceAtLeast(1f)
+    val cellWidth = terminalCellWidth(
+        availableWidth = availableWidth,
+        sourceCols = sourceCols,
+        requestedFontSizePx = requestedFontSizePx,
+        referenceAdvance = referenceAdvance,
+        fitWidth = fitWidth
+    )
     val contentWidth = sourceCols * cellWidth
 
     // Exact horizontal pan bounds (minPanX brings rightmost column to right edge)
-    val minPanX = minOf(0f, availableWidth - contentWidth)
-    val maxPanX = 0f
-    val clampedPanX = if (contentWidth <= availableWidth) 0f else panOffset.x.coerceIn(minPanX, maxPanX)
+    val clampedPanX = terminalPanX(availableWidth, contentWidth, panOffset.x)
 
     // Derive strictly proportional typography from Maple Mono character metrics
-    textPaint.textSize = 100f
-    val referenceAdvance = textPaint.measureText("M").coerceAtLeast(1f)
     textPaint.textSize = (100f * cellWidth) / referenceAdvance
 
     val fontMetrics = textPaint.fontMetrics
     val rowHeight = (fontMetrics.bottom - fontMetrics.top) * 1.10f
     val baselineOffset = -fontMetrics.top
     val contentHeight = rows * rowHeight
-    val bottomAlignmentOffset = (canvasHeight - contentHeight).coerceAtLeast(0f)
+    val bottomAlignmentOffset = canvasHeight - contentHeight
 
     val originX = leftPaddingPx + clampedPanX
-    val originY = bottomAlignmentOffset + panOffset.y
+    val resolvedPanY = if (focusRow != null) terminalFocusPanY(canvasHeight, contentHeight, rowHeight, focusRow)
+        else terminalPanY(canvasHeight, contentHeight, panOffset.y)
+    val originY = bottomAlignmentOffset + resolvedPanY
 
     return TerminalGeometry(
         canvasWidth = canvasWidth,
@@ -157,7 +164,8 @@ internal fun computeTerminalGeometry(
         rowHeight = rowHeight,
         baselineOffset = baselineOffset,
         originX = originX,
-        originY = originY
+        originY = originY,
+        fontSizePx = textPaint.textSize
     )
 }
 
@@ -167,13 +175,16 @@ fun TerminalCanvas(
     onTap: () -> Unit,
     onTerminalScroll: (Double) -> Unit,
     modifier: Modifier = Modifier,
-    userFontSizeSp: Float = 14.5f,
+    displayPreference: TerminalDisplayPreference = TerminalDisplayPreference(),
+    onDisplayPreferenceChange: (TerminalDisplayPreference) -> Unit = {},
     themeHex: String = "#1E1E1E"
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
-    var scaleFactor by remember { mutableStateOf(1.0f) }
-    var panOffset by remember { mutableStateOf(Offset.Zero) }
+    val requestedFontSizePx = with(density) { displayPreference.fontSizeSp.sp.toPx() }
+    val panOffset = Offset(displayPreference.panX, displayPreference.panY ?: 0f)
+    val currentDisplayPreference by rememberUpdatedState(displayPreference)
+    val currentOnDisplayPreferenceChange by rememberUpdatedState(onDisplayPreferenceChange)
     var canvasSizePx by remember { mutableStateOf(Size.Zero) }
     val lastDrawnTraceId = remember(screenState.surfaceId) { AtomicLong(0L) }
     val localScrollOffsets = remember { mutableStateMapOf<String, Int>() }
@@ -302,7 +313,6 @@ fun TerminalCanvas(
     val activeDefaultBgColor = selectionBackgroundColor ?: defaultBgColor
     val currentDefaultBgColor by rememberUpdatedState(defaultBgColor)
 
-    val isZoomedOrPanned = scaleFactor != 1.0f || panOffset != Offset.Zero
     val currentOnTap by rememberUpdatedState(onTap)
     val currentEffectiveGrid by rememberUpdatedState(effectiveGrid)
     val currentSelectionState by rememberUpdatedState(selectionState)
@@ -313,16 +323,21 @@ fun TerminalCanvas(
     val activeGrid = currentSelection?.viewport?.grid ?: effectiveGrid
     val activeSourceCols = currentSelection?.viewport?.columns ?: calculateRenderSourceCols(effectiveGrid, screenState.columns)
     val activeRows = currentSelection?.viewport?.rows ?: maxOf(screenState.rows, 1)
+    val focusRow = if (displayPreference.panY != null) null else if (screenState.cursor.visible && effectiveOffset == 0) {
+        screenState.cursor.row.coerceIn(0, activeRows - 1)
+    } else activeGrid.indexOfLast { row -> row.any { it.text.isNotBlank() } }.coerceAtLeast(0)
 
-    val geometry = remember(canvasSizePx, activeSourceCols, activeRows, scaleFactor, panOffset, mapleTypeface) {
+    val geometry = remember(canvasSizePx, activeSourceCols, activeRows, requestedFontSizePx, displayPreference.fitWidth, panOffset, focusRow, mapleTypeface) {
         if (canvasSizePx.width > 0f && canvasSizePx.height > 0f) {
             computeTerminalGeometry(
                 canvasWidth = canvasSizePx.width,
                 canvasHeight = canvasSizePx.height,
                 sourceCols = activeSourceCols,
                 rows = activeRows,
-                scaleFactor = scaleFactor,
+                requestedFontSizePx = requestedFontSizePx,
+                fitWidth = displayPreference.fitWidth,
                 panOffset = panOffset,
+                focusRow = focusRow,
                 textPaint = textPaint
             )
         } else {
@@ -335,15 +350,11 @@ fun TerminalCanvas(
         modifier = modifier
             .fillMaxSize()
             .background(ComposeColor(activeDefaultBgColor))
-            .onSizeChanged {
-                canvasSizePx = Size(it.width.toFloat(), it.height.toFloat())
-            }
             .pointerInput(surfaceId, isSelecting) {
                 if (!isSelecting) {
                     detectTapGestures(
                         onDoubleTap = {
-                            scaleFactor = 1.0f
-                            panOffset = Offset.Zero
+                            currentOnDisplayPreferenceChange(currentDisplayPreference.copy(fitWidth = true, panX = 0f, panY = null))
                         },
                         onLongPress = { offset ->
                             val geom = currentGeometry ?: return@detectTapGestures
@@ -355,10 +366,13 @@ fun TerminalCanvas(
                                 rows = geom.rows
                             )
                             selectionBackgroundColor = currentDefaultBgColor
+                            currentOnDisplayPreferenceChange(currentDisplayPreference.copy(
+                                panY = geom.originY - (geom.canvasHeight - geom.rows * geom.rowHeight)
+                            ))
                             selectionState = beginWordSelection(viewport, geom.pointToCell(offset))
                         },
-                        onTap = {
-                            currentOnTap()
+                        onTap = { offset ->
+                            if (offset.y < canvasSizePx.height) currentOnTap()
                         }
                     )
                 } else {
@@ -373,21 +387,33 @@ fun TerminalCanvas(
                     )
                 }
             }
-            .pointerInput(isSelecting) {
+            .pointerInput(surfaceId, isSelecting, density) {
                 if (!isSelecting) {
-                    detectTransformGestures(panZoomLock = false) { _, pan, zoom, _ ->
+                    detectTransformGestures(panZoomLock = false) { centroid, pan, zoom, _ ->
                         if (zoom != 1.0f || pan != Offset.Zero) {
-                            scaleFactor = (scaleFactor * zoom).coerceIn(0.5f, 4.0f)
-                            panOffset = Offset(
-                                x = panOffset.x + pan.x,
-                                y = (panOffset.y + pan.y).coerceIn(-4000f, 400f)
-                            )
+                            val geom = currentGeometry ?: return@detectTransformGestures
+                            val pref = currentDisplayPreference
+                            val nextFont = if (zoom != 1f) {
+                                (with(density) { geom.fontSizePx.toSp().value } * zoom).coerceIn(2f, 48f)
+                            } else pref.fontSizeSp
+                            val ratio = if (zoom != 1f) with(density) { nextFont.sp.toPx() } / geom.fontSizePx else 1f
+                            currentOnDisplayPreferenceChange(transformTerminalDisplay(
+                                preference = pref,
+                                geometry = geom,
+                                nextFontSizeSp = nextFont,
+                                scaleRatio = ratio,
+                                centroid = centroid,
+                                pan = pan,
+                                isZooming = zoom != 1f
+                            ))
                         }
                     }
                 }
             }
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        Canvas(modifier = Modifier.fillMaxSize().padding(bottom = 48.dp).onSizeChanged {
+            canvasSizePx = Size(it.width.toFloat(), it.height.toFloat())
+        }) {
             val nativeCanvas = drawContext.canvas.nativeCanvas
             val canvasWidth = size.width
             val canvasHeight = size.height
@@ -398,8 +424,10 @@ fun TerminalCanvas(
                 canvasHeight = canvasHeight,
                 sourceCols = activeSourceCols,
                 rows = activeRows,
-                scaleFactor = scaleFactor,
+                requestedFontSizePx = requestedFontSizePx,
+                fitWidth = displayPreference.fitWidth,
                 panOffset = panOffset,
+                focusRow = focusRow,
                 textPaint = textPaint
             )
 
@@ -710,43 +738,6 @@ fun TerminalCanvas(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            AnimatedVisibility(
-                visible = isZoomedOrPanned && selectionState == null,
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                Surface(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .border(1.dp, ComposeColor(0x55FFFFFF), RoundedCornerShape(20.dp))
-                        .clickable {
-                            scaleFactor = 1.0f
-                            panOffset = Offset.Zero
-                        },
-                    color = ComposeColor(0xDD222226),
-                    tonalElevation = 6.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FitScreen,
-                            contentDescription = "Fit Width",
-                            tint = ComposeColor(0xFF00FF7F),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Fit Width",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = ComposeColor.White
-                        )
-                    }
-                }
-            }
-
             if (selectionState == null) {
                 VerticalScrollJoystick(
                     onScrollLines = { deltaLines ->
@@ -762,6 +753,61 @@ fun TerminalCanvas(
                         }
                     }
                 )
+            }
+        }
+        TerminalTextControls(
+            preference = displayPreference,
+            renderedFontSizeSp = geometry?.let { with(density) { it.fontSizePx.toSp().value } } ?: displayPreference.fontSizeSp,
+            enabled = !isSelecting,
+            onChange = onDisplayPreferenceChange,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
+    }
+}
+
+@Composable
+private fun TerminalTextControls(
+    preference: TerminalDisplayPreference,
+    renderedFontSizeSp: Float,
+    enabled: Boolean,
+    onChange: (TerminalDisplayPreference) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val canDecrease = enabled && !preference.fitWidth && preference.fontSizeSp > 2f
+    val canIncrease = enabled && !preference.fitWidth && preference.fontSizeSp < 48f
+    Surface(modifier = modifier, color = ComposeColor(0xFF222226)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = {
+                        onChange(preference.copy(fontSizeSp = (preference.fontSizeSp - 1f).coerceAtLeast(2f), panX = 0f, panY = null))
+                    },
+                    enabled = canDecrease,
+                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                        .semantics { contentDescription = "Decrease terminal text size" }
+                ) { Text("A−", color = if (canDecrease) ComposeColor.White else ComposeColor.Gray) }
+                Text("${(renderedFontSizeSp * 10).roundToInt() / 10f} sp", color = ComposeColor(0xFFCCCCCC), fontSize = 12.sp)
+                TextButton(
+                    onClick = {
+                        onChange(preference.copy(fontSizeSp = (preference.fontSizeSp + 1f).coerceAtMost(48f), panX = 0f, panY = null))
+                    },
+                    enabled = canIncrease,
+                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                        .semantics { contentDescription = "Increase terminal text size" }
+                ) { Text("A+", color = if (canIncrease) ComposeColor.White else ComposeColor.Gray) }
+            }
+            TextButton(
+                onClick = { onChange(preference.copy(fitWidth = !preference.fitWidth, panX = 0f, panY = null)) },
+                enabled = enabled,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
+                Icon(Icons.Default.FitScreen, contentDescription = null, tint = ComposeColor(0xFF00FF7F), modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(if (preference.fitWidth) "Readable" else "Fit Width", color = ComposeColor.White, fontSize = 12.sp)
             }
         }
     }
