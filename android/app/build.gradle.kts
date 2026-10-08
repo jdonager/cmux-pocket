@@ -66,6 +66,10 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        // Connection lifecycle tests run on the JVM with Android logging stubbed out.
+        unitTests.isReturnDefaultValues = true
+    }
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"

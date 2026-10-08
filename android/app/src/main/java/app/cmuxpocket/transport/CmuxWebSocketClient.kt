@@ -75,12 +75,13 @@ class CmuxWebSocketClient(
     private var isAuthCompleted = false
 
     fun connect(url: String, token: String) {
+        // Validate before publishing CONNECTING so rejected URLs remain disconnected.
+        val request = Request.Builder().url(url).build()
         this.authToken = token
         this.isAuthCompleted = false
         _statusFlow.value = ConnectionStatus.CONNECTING
         Log.i(tag, "Connecting to gateway...")
 
-        val request = Request.Builder().url(url).build()
         webSocket = okHttpClient.newWebSocket(request, this)
     }
 
