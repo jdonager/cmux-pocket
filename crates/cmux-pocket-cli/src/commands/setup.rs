@@ -156,7 +156,7 @@ pub async fn handle_setup(
             if let Ok(report) =
                 probe_gateway(&config.host, config.port, &token, Duration::from_secs(2)).await
             {
-                if report.connected && report.authenticated {
+                if report.connected && report.is_backend_healthy() {
                     probe_ok = true;
                     break;
                 }
@@ -204,7 +204,7 @@ pub async fn handle_setup(
         if service_started { "Started & Enabled" } else if args.no_start { "Configured (no-start flag)" } else { "Created" },
         if cmux_ping_ok { "Ready (ping ok)" } else if cmux_found { "Found" } else { "Not running" },
         discovered_cmux.display(),
-        if probe_ok { "OK (authenticated)" } else if args.no_start { "Skipped (--no-start)" } else { "Pending start" },
+        if probe_ok { "OK (workspace access verified)" } else if args.no_start { "Skipped (--no-start)" } else { "Unavailable (run cmux-pocket gateway probe)" },
         next_steps,
         token_path.display()
     );

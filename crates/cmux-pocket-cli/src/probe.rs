@@ -1,7 +1,7 @@
 //! Read-only WebSocket probe against running Gateway instance.
 
 use crate::error::CliError;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{SinkExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
@@ -33,8 +33,66 @@ pub struct ProbeReport {
     pub error: Option<String>,
 }
 
+impl ProbeReport {
+    pub fn is_backend_healthy(&self) -> bool {
+        self.authenticated
+            && self.backend_health.as_deref() == Some("healthy")
+            && self.error.is_none()
+    }
+}
+
+async fn receive_rpc_result<S>(
+    read: &mut S,
+    request_id: &str,
+    timeout_duration: Duration,
+) -> Result<Value, CliError>
+where
+    S: Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    timeout(timeout_duration, async {
+        while let Some(message) = read.next().await {
+            let message = message.map_err(|e| {
+                CliError::RuntimeFailure(format!("Read error during Gateway probe: {e}"))
+            })?;
+            match message {
+                Message::Text(text) => {
+                    let response: Value = serde_json::from_str(&text).map_err(|e| {
+                        CliError::RuntimeFailure(format!("Invalid RPC response JSON: {e}"))
+                    })?;
+                    if response.get("id").and_then(Value::as_str) != Some(request_id) {
+                        continue;
+                    }
+                    if let Some(error) = response.get("error") {
+                        let message = error
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .unwrap_or("RPC error");
+                        return Err(CliError::DependencyUnavailable(format!(
+                            "Gateway returned RPC error: {message}"
+                        )));
+                    }
+                    return response.get("result").cloned().ok_or_else(|| {
+                        CliError::RuntimeFailure("Gateway RPC response has no result".to_string())
+                    });
+                }
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+        Err(CliError::DependencyUnavailable(
+            "Gateway disconnected during probe".to_string(),
+        ))
+    })
+    .await
+    .map_err(|_| {
+        CliError::DependencyUnavailable(format!(
+            "Timed out waiting for Gateway response {request_id}"
+        ))
+    })?
+}
+
 /// Connects to a running Gateway over loopback WebSocket, performs authentication,
-/// and executes read-only `mobile.host.status`.
+/// and checks host status and workspace access from the Gateway's own process.
 pub async fn probe_gateway(
     host: &str,
     port: u16,
@@ -173,64 +231,47 @@ pub async fn probe_gateway(
         )));
     }
 
-    let mut host_status = None;
-    let mut backend_health = None;
+    let host_status = receive_rpc_result(&mut read, "probe-status-1", timeout_duration).await?;
+    let mut backend_health = host_status
+        .get("backend_health")
+        .and_then(|health| health.get("status"))
+        .and_then(Value::as_str)
+        .map(String::from);
 
-    let rpc_res = timeout(timeout_duration, read.next()).await;
-    match rpc_res {
-        Ok(Some(Ok(msg))) => match msg {
-            Message::Text(text) => {
-                let parsed: Value = serde_json::from_str(&text).map_err(|e| {
-                    CliError::RuntimeFailure(format!("Invalid RPC response JSON: {}", e))
-                })?;
-
-                if let Some(err) = parsed.get("error") {
-                    let err_msg = err
-                        .get("message")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("RPC error");
-                    return Err(CliError::DependencyUnavailable(format!(
-                        "Gateway returned RPC error: {}",
-                        err_msg
-                    )));
-                }
-
-                if let Some(res) = parsed.get("result") {
-                    host_status = Some(res.clone());
-                    if let Some(health_obj) = res.get("backend_health") {
-                        if let Some(st) = health_obj.get("status").and_then(|s| s.as_str()) {
-                            backend_health = Some(st.to_string());
-                        }
-                    }
-                }
-            }
-            Message::Close(frame) => {
-                return Err(CliError::DependencyUnavailable(format!(
-                    "Gateway closed connection during RPC call: {:?}",
-                    frame
-                )));
-            }
-            _ => {}
-        },
-        Ok(Some(Err(e))) => {
-            return Err(CliError::RuntimeFailure(format!(
-                "Read error during RPC: {}",
-                e
-            )));
-        }
-        Ok(None) => {
-            return Err(CliError::DependencyUnavailable(
-                "Gateway disconnected during RPC".to_string(),
+    // A probe inside a cmux terminal can ping successfully while the launchd
+    // Gateway lacks socket access. Query workspaces through the Gateway itself.
+    let workspace_req =
+        json!({"id": "probe-workspaces-1", "method": "mobile.workspace.list", "params": {}});
+    let workspace_result = async {
+        write
+            .send(Message::Text(workspace_req.to_string()))
+            .await
+            .map_err(|e| {
+                CliError::RuntimeFailure(format!("Failed to send workspace probe: {e}"))
+            })?;
+        let result = receive_rpc_result(&mut read, "probe-workspaces-1", timeout_duration).await?;
+        if !result.get("workspaces").is_some_and(Value::is_array) {
+            return Err(CliError::RuntimeFailure(
+                "Gateway workspace response has no workspace list".to_string(),
             ));
         }
-        Err(_) => {
-            return Err(CliError::DependencyUnavailable(
-                "Timed out waiting for mobile.host.status response from Gateway".to_string(),
-            ));
-        }
+        // Workspace names and contents are deliberately not retained in the report.
+        Ok(())
     }
+    .await;
 
-    // 4. Send clean close
+    let error = match workspace_result {
+        Ok(()) => {
+            backend_health.get_or_insert_with(|| "healthy".to_string());
+            None
+        }
+        Err(error) => {
+            backend_health = Some("unhealthy".to_string());
+            Some(format!("Gateway workspace query failed: {error}. Check cmux socket access: 'cmux processes only' rejects launchd; run the Gateway in a cmux terminal or configure authenticated local automation."))
+        }
+    };
+
+    // Send clean close
     let _ = write.send(Message::Close(None)).await;
 
     let elapsed = start_time.elapsed().as_millis() as u64;
@@ -243,9 +284,9 @@ pub async fn probe_gateway(
         server_version,
         session_id,
         capabilities,
-        host_status,
+        host_status: Some(host_status),
         latency_ms: elapsed,
         backend_health,
-        error: None,
+        error,
     })
 }

@@ -20,6 +20,25 @@ On macOS, install and start cmux, then verify:
 cmux ping
 ```
 
+### cmux socket access
+
+The Gateway must be allowed to query cmux workspaces from the process that runs it. A successful `cmux ping` in a cmux terminal does not prove that the launchd service has the same access.
+
+cmux's default **cmux processes only** socket mode rejects processes started by launchd. In that mode, the phone can authenticate with the Gateway while workspace discovery fails with `Access denied - only processes started inside cmux can connect`.
+
+To keep this access mode, run the Gateway in a dedicated **cmux terminal**, using the existing configuration and token:
+
+```bash
+cmux-pocket service stop
+cmux-pocket gateway run
+```
+
+Keep that terminal tab open while using the phone. The Mac must be awake, with cmux, Tailscale (if used), and the Gateway running. This foreground process ends when the tab is closed and does not automatically restart at login.
+
+For a background login service, configure cmux to permit authenticated local automation. If your installed cmux version supports **Password mode**, configure it in cmux's Automation settings; its CLI can use the password saved in cmux Settings. This socket password is separate from the Gateway token entered on Android. Follow the [cmux configuration documentation](https://cmux.com/docs/configuration#automation) for your version, then restart the Gateway service and run `cmux-pocket gateway probe` to verify workspace access. cmux Pocket does not change cmux's access settings automatically.
+
+### Install the Gateway
+
 Install the Rust CLI from the project tap and run the idempotent setup:
 
 ```bash
@@ -184,6 +203,18 @@ Official references: [Cloudflare Tunnel setup](https://developers.cloudflare.com
 
 A VPN is suitable when the phone and Mac can reach a private ingress that terminates TLS. The VPN does not remove the WSS requirement: use a trusted `wss://` endpoint and keep the Gateway bound to loopback.
 
+### Tailscale Serve
+
+With Tailscale connected on both devices, run this on the Mac:
+
+```bash
+tailscale serve --bg --https=443 http://127.0.0.1:8088
+```
+
+If Serve is not enabled for the tailnet, follow the account enablement link printed by the command. Once enabled, Serve prints an HTTPS URL such as `https://mac-name.tail-example.ts.net/`. In Android, use that full hostname with `wss://`, port `443`, and the existing Gateway token. A numeric Tailscale IP does not provide this TLS hostname, and a pipe between two `nc` commands is not a bidirectional TLS WebSocket proxy.
+
+[Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve) handles TLS and forwards WebSocket connections to the loopback Gateway within the tailnet. It does not replace the Gateway process or grant it permission to access cmux's socket.
+
 ## 3. Configure the Android app
 
 1. Open **Settings**.
@@ -241,6 +272,7 @@ ADB reverse is intentionally not the normal LAN/remote setup. It depends on USB 
 | cmux is unreachable | The Rust Gateway remains resident and reports a degraded backend. Start cmux, verify `cmux ping`, then run `cmux-pocket service restart` or `cmux-pocket gateway probe`. |
 | Authentication fails | Read the current token from the protected token file and update the app profile. Never log or publish the token. |
 | Non-loopback connection is rejected | Change the profile to a trusted `wss://` endpoint. Plaintext LAN `ws://` is unsupported. |
+| Phone connects but no Workspaces appear | Run `cmux-pocket gateway probe`. The Gateway must be able to query workspaces from its own process; cmux's **cmux processes only** mode rejects launchd. See [cmux socket access](#cmux-socket-access). |
 | TLS handshake fails | Use a certificate trusted by Android and verify the proxy forwards WebSocket upgrades. |
 | Tunnel connects but stays in CONNECTING | Use the public TLS endpoint and port, normally `wss://...` on `443`; do not pair a public hostname with local port `8088` unless explicitly configured. |
 | Reconnect pauses | Tap **Reconnect** after fixing the endpoint, token, certificate, or network boundary. |

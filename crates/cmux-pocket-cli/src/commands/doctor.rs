@@ -323,18 +323,24 @@ pub async fn handle_doctor(
             .await
             {
                 Ok(report) => {
+                    let backend_healthy = report.is_backend_healthy();
+                    if !backend_healthy {
+                        has_failures = true;
+                    }
                     checks.push(DoctorCheck {
                         name: "gateway_probe".to_string(),
-                        status: "pass".to_string(),
-                        message: format!(
-                            "Gateway probe authenticated OK (version: {}, backend: {})",
-                            report.server_version.as_deref().unwrap_or("unknown"),
-                            report.backend_health.as_deref().unwrap_or("unknown")
-                        ),
+                        status: if backend_healthy { "pass" } else { "fail" }.to_string(),
+                        message: report.error.clone().unwrap_or_else(|| {
+                            format!(
+                                "Gateway probe authenticated OK (version: {}, backend: {})",
+                                report.server_version.as_deref().unwrap_or("unknown"),
+                                report.backend_health.as_deref().unwrap_or("unknown")
+                            )
+                        }),
                     });
 
                     // 10. Deep checks if requested
-                    if args.deep {
+                    if args.deep && backend_healthy {
                         checks.push(DoctorCheck {
                             name: "deep_diagnostics".to_string(),
                             status: "pass".to_string(),
