@@ -86,6 +86,7 @@ class TerminalViewModel : ViewModel() {
     private var reconnectJob: Job? = null
     private var reconnectAttempt = 0
     private var manualDisconnect = true
+    private var connectionValidationError: String? = null
     private var pendingNotificationWorkspaceId: String? = null
     private var pendingNotificationSurfaceId: String? = null
 
@@ -190,7 +191,7 @@ class TerminalViewModel : ViewModel() {
                     }
                     ConnectionStatus.DISCONNECTED -> {
                         _syncPhase.value = AppSyncPhase.DISCONNECTED
-                        _statusMessage.value = "Disconnected"
+                        _statusMessage.value = connectionValidationError ?: "Disconnected"
                         awaitingReplaySurfaces.clear()
                         mutationTracker.clear()
                         scheduleReconnect()
@@ -234,6 +235,7 @@ class TerminalViewModel : ViewModel() {
 
     fun connect(host: String = "127.0.0.1", port: Int = 8088, token: String = "") {
         manualDisconnect = true
+        connectionValidationError = null
         reconnectJob?.cancel()
         reconnectJob = null
         wsClient.disconnect()
@@ -249,9 +251,11 @@ class TerminalViewModel : ViewModel() {
             _statusMessage.value = "Connecting to gateway..."
             wsClient.connect(url, target.token)
         } catch (e: IllegalArgumentException) {
-            _syncPhase.value = AppSyncPhase.DISCONNECTED
-            _statusMessage.value = e.message ?: "Invalid connection endpoint"
             manualDisconnect = true
+            connectionValidationError = e.message ?: "Invalid connection endpoint"
+            wsClient.disconnect()
+            _syncPhase.value = AppSyncPhase.DISCONNECTED
+            _statusMessage.value = connectionValidationError!!
         }
     }
 
@@ -302,6 +306,7 @@ class TerminalViewModel : ViewModel() {
 
     fun disconnect() {
         manualDisconnect = true
+        connectionValidationError = null
         lastConnectionTarget = null
         reconnectAttempt = 0
         reconnectJob?.cancel()
