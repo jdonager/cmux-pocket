@@ -171,11 +171,41 @@ async fn status_does_not_report_healthy_when_gateway_workspace_access_fails() {
     assert_eq!(data["cmux"]["ping_ok"], true);
     assert_eq!(data["gateway"]["authenticated_probe"], true);
     assert_eq!(data["gateway"]["backend_health"], "unhealthy");
-    assert!(data["overall_status"]
-        .as_str()
-        .unwrap()
-        .starts_with("degraded"));
+    assert_eq!(
+        data["overall_status"].as_str(),
+        Some("degraded (cmux workspace access unavailable)")
+    );
     task.await.unwrap();
+
+    let (port_unreach, task_unreach) = spawn_gateway(denied_workspaces(), false, false).await;
+    let temp_unreach = TempDir::new().unwrap();
+    let paths_unreach = PocketPaths::from_home_dir(temp_unreach.path());
+    create_dir_user_only(&paths_unreach.config_dir).unwrap();
+    let config_unreach = GatewayConfig {
+        port: port_unreach,
+        token_path: Some(paths_unreach.token_file.clone()),
+        cmux_path: Some("/usr/bin/false".into()),
+        ..GatewayConfig::default()
+    };
+    save_config(&paths_unreach.config_file, &config_unreach).unwrap();
+    save_token(&paths_unreach.token_file, TOKEN).unwrap();
+    let output_unreach = tokio::process::Command::new(env!("CARGO_BIN_EXE_cmux-pocket"))
+        .args([
+            "--config",
+            paths_unreach.config_file.to_str().unwrap(),
+            "--json",
+            "status",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(output_unreach.status.success());
+    let envelope_unreach: Value = serde_json::from_slice(&output_unreach.stdout).unwrap();
+    assert_eq!(
+        envelope_unreach["data"]["overall_status"].as_str(),
+        Some("degraded (cmux unreachable)")
+    );
+    task_unreach.await.unwrap();
 }
 
 #[tokio::test]

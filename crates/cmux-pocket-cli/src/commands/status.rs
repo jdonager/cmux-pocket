@@ -222,12 +222,12 @@ pub async fn handle_status(
     // 6. Compute overall status
     let overall_status = if !config_exists || !token_exists {
         "unconfigured".to_string()
+    } else if auth_probe_ok && !ping_ok {
+        "degraded (cmux unreachable)".to_string()
     } else if auth_probe_ok && backend_health.as_deref() != Some("healthy") {
         "degraded (cmux workspace access unavailable)".to_string()
     } else if auth_probe_ok && ping_ok {
         "healthy".to_string()
-    } else if auth_probe_ok && !ping_ok {
-        "degraded (cmux unreachable)".to_string()
     } else if listening && !auth_probe_ok {
         "degraded (auth probe failed)".to_string()
     } else if service_status.registered && launchd_status.pid.is_some() {
