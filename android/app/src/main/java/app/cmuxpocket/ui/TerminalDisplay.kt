@@ -10,12 +10,16 @@ data class TerminalDisplayPreference(
     val fontSizeSp: Float = 14.5f,
     val fitWidth: Boolean = false,
     val panX: Float = 0f,
-    val panY: Float? = null
+    val panY: Float? = null,
+    // The row that was current when the user deliberately moved the view vertically.
+    // A later cursor move means the terminal should resume following live output.
+    val panAnchorRow: Int? = null
 ) {
     fun normalized(): TerminalDisplayPreference = copy(
         fontSizeSp = if (fontSizeSp.isFinite()) fontSizeSp.coerceIn(2f, 48f) else 14.5f,
         panX = if (panX.isFinite()) panX else 0f,
-        panY = panY?.takeIf { it.isFinite() }
+        panY = panY?.takeIf { it.isFinite() },
+        panAnchorRow = panAnchorRow?.takeIf { panY?.isFinite() == true && it >= 0 }
     )
 }
 
@@ -55,19 +59,40 @@ internal fun transformTerminalDisplay(
     scaleRatio: Float,
     centroid: Offset,
     pan: Offset,
-    isZooming: Boolean
+    isZooming: Boolean,
+    focusRow: Int?
 ): TerminalDisplayPreference {
     val contentWidth = geometry.sourceCols * geometry.cellWidth * scaleRatio
     val contentHeight = geometry.rows * geometry.rowHeight * scaleRatio
     val desiredX = centroid.x - (centroid.x - geometry.originX) * scaleRatio + pan.x
     val desiredY = centroid.y - (centroid.y - geometry.originY) * scaleRatio + pan.y
+    val nextPanY = terminalPanY(geometry.canvasHeight, contentHeight, desiredY - (geometry.canvasHeight - contentHeight))
+    val focusPanY = focusRow?.let {
+        terminalFocusPanY(geometry.canvasHeight, contentHeight, geometry.rowHeight * scaleRatio, it)
+    }
+    val keepsFollowingCursor = focusPanY != null && kotlin.math.abs(nextPanY - focusPanY) < 0.5f
+    val preserveVerticalPosition = pan.y == 0f && !isZooming
     return preference.copy(
         fontSizeSp = nextFontSizeSp,
         fitWidth = preference.fitWidth && !isZooming,
         panX = terminalPanX(geometry.canvasWidth - 8f, contentWidth, desiredX - 4f),
-        panY = terminalPanY(geometry.canvasHeight, contentHeight, desiredY - (geometry.canvasHeight - contentHeight))
+        panY = when {
+            preserveVerticalPosition -> preference.panY
+            keepsFollowingCursor -> null
+            else -> nextPanY
+        },
+        panAnchorRow = when {
+            preserveVerticalPosition -> preference.panAnchorRow
+            keepsFollowingCursor -> null
+            else -> focusRow
+        }
     ).normalized()
 }
+
+/** A manual vertical position applies only while the cursor remains at its original row. */
+internal fun terminalViewportIsDetached(preference: TerminalDisplayPreference, liveCursorRow: Int?): Boolean =
+    preference.panY != null && preference.panAnchorRow != null &&
+        (liveCursorRow == null || preference.panAnchorRow == liveCursorRow)
 
 internal fun terminalPanX(availableWidth: Float, contentWidth: Float, panX: Float): Float =
     panX.coerceIn(minOf(0f, availableWidth - contentWidth), 0f)

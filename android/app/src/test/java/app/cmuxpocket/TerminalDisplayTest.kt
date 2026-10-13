@@ -8,6 +8,7 @@ import app.cmuxpocket.ui.terminalDisplayKey
 import app.cmuxpocket.ui.terminalFocusPanY
 import app.cmuxpocket.ui.terminalPanX
 import app.cmuxpocket.ui.terminalPanY
+import app.cmuxpocket.ui.terminalViewportIsDetached
 import app.cmuxpocket.ui.TerminalGeometry
 import app.cmuxpocket.ui.transformTerminalDisplay
 import androidx.compose.ui.geometry.Offset
@@ -39,7 +40,7 @@ class TerminalDisplayTest {
 
     @Test
     fun viewsAreSavedSeparatelyForEachTerminalAndHost() {
-        val first = TerminalDisplayPreference(fontSizeSp = 22f, panX = -120f, panY = 60f)
+        val first = TerminalDisplayPreference(fontSizeSp = 22f, panX = -120f, panY = 60f, panAnchorRow = 12)
         val second = TerminalDisplayPreference(fontSizeSp = 12f, fitWidth = true)
         val firstKey = terminalDisplayKey("demo.example", 443, "terminal-one")
         val secondKey = terminalDisplayKey("demo.example", 443, "terminal-two")
@@ -80,7 +81,7 @@ class TerminalDisplayTest {
         val geometry = TerminalGeometry(360f, 500f, 160, 60, 8f, 20f, 16f, 4f, -700f, 20f)
         val fingers = Offset(180f, 250f)
         val next = transformTerminalDisplay(
-            TerminalDisplayPreference(fontSizeSp = 20f), geometry, 40f, 2f, fingers, Offset.Zero, true
+            TerminalDisplayPreference(fontSizeSp = 20f), geometry, 40f, 2f, fingers, Offset.Zero, true, 12
         )
         val zoomed = geometry.copy(
             cellWidth = 16f,
@@ -97,11 +98,32 @@ class TerminalDisplayTest {
     fun pinchZoomFromFitWidthSavesTheActualRenderedSize() {
         val geometry = TerminalGeometry(360f, 500f, 160, 60, 2.2f, 5f, 4f, 4f, 200f, 4f)
         val next = transformTerminalDisplay(
-            TerminalDisplayPreference(fitWidth = true), geometry, 8f, 2f, Offset(180f, 300f), Offset.Zero, true
+            TerminalDisplayPreference(fitWidth = true), geometry, 8f, 2f, Offset(180f, 300f), Offset.Zero, true, 20
         )
         assertEquals(false, next.fitWidth)
         assertEquals(8f, next.fontSizeSp)
         assertEquals(next, decodeTerminalDisplay(encodeTerminalDisplay(next), 14.5f))
+    }
+
+    @Test
+    fun horizontalPanDoesNotDisableCursorFollowing() {
+        // A 60-row terminal focused on row 0 starts at the top of the viewport.
+        val geometry = TerminalGeometry(360f, 400f, 160, 60, 8f, 20f, 16f, 4f, 0f, 20f)
+        val next = transformTerminalDisplay(
+            TerminalDisplayPreference(fontSizeSp = 20f), geometry, 20f, 1f, Offset(180f, 200f), Offset(-50f, 0f), false, 0
+        )
+
+        assertEquals(-50f, next.panX)
+        assertEquals(null, next.panY)
+        assertEquals(null, next.panAnchorRow)
+    }
+
+    @Test
+    fun cursorMovementReenablesAutomaticFollowing() {
+        val detached = TerminalDisplayPreference(panY = 400f, panAnchorRow = 50)
+
+        assertTrue(terminalViewportIsDetached(detached, 50))
+        assertEquals(false, terminalViewportIsDetached(detached, 0))
     }
 
     private fun width(

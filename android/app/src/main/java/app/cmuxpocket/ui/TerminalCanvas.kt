@@ -323,9 +323,20 @@ fun TerminalCanvas(
     val activeGrid = currentSelection?.viewport?.grid ?: effectiveGrid
     val activeSourceCols = currentSelection?.viewport?.columns ?: calculateRenderSourceCols(effectiveGrid, screenState.columns)
     val activeRows = currentSelection?.viewport?.rows ?: maxOf(screenState.rows, 1)
-    val focusRow = if (displayPreference.panY != null) null else if (screenState.cursor.visible && effectiveOffset == 0) {
+    val liveCursorRow = if (screenState.cursor.visible && effectiveOffset == 0) {
         screenState.cursor.row.coerceIn(0, activeRows - 1)
-    } else activeGrid.indexOfLast { row -> row.any { it.text.isNotBlank() } }.coerceAtLeast(0)
+    } else null
+    val activeFocusRow = liveCursorRow
+        ?: activeGrid.indexOfLast { row -> row.any { it.text.isNotBlank() } }.coerceAtLeast(0)
+    val focusRow = if (isSelecting || terminalViewportIsDetached(displayPreference, liveCursorRow)) null else activeFocusRow
+
+    LaunchedEffect(displayPreference.panY, displayPreference.panAnchorRow, liveCursorRow) {
+        if (displayPreference.panY != null && displayPreference.panAnchorRow != null &&
+            liveCursorRow != null && displayPreference.panAnchorRow != liveCursorRow
+        ) {
+            currentOnDisplayPreferenceChange(displayPreference.copy(panY = null, panAnchorRow = null))
+        }
+    }
 
     val geometry = remember(canvasSizePx, activeSourceCols, activeRows, requestedFontSizePx, displayPreference.fitWidth, panOffset, focusRow, mapleTypeface) {
         if (canvasSizePx.width > 0f && canvasSizePx.height > 0f) {
@@ -404,7 +415,8 @@ fun TerminalCanvas(
                                 scaleRatio = ratio,
                                 centroid = centroid,
                                 pan = pan,
-                                isZooming = zoom != 1f
+                                isZooming = zoom != 1f,
+                                focusRow = activeFocusRow
                             ))
                         }
                     }
