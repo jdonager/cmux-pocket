@@ -66,7 +66,7 @@ pub fn close_surface_args(surface_id: &str, workspace_key: Option<&str>) -> Vec<
 
 /// Maps terminal text input to either `send-key` for control/special keys or `send` for literal text.
 pub fn send_input_args(surface_id: &str, text: &str) -> Vec<String> {
-    match text {
+    let mut args = match text {
         "\u{001b}" => vec![
             "send-key".to_string(),
             "--surface".to_string(),
@@ -133,7 +133,12 @@ pub fn send_input_args(surface_id: &str, text: &str) -> Vec<String> {
             surface_id.to_string(),
             text.to_string(),
         ],
-    }
+    };
+
+    // Input from the phone is an intentional remote action. cmux otherwise refuses every
+    // subsequent key after the first one has created a draft in the target surface.
+    args.insert(args.len() - 1, "--force".to_string());
+    args
 }
 
 /// Constructs arguments for `cmux rpc terminal.replay <json_payload>`.

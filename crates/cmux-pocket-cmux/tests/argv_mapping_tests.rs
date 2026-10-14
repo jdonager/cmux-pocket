@@ -82,68 +82,79 @@ fn test_send_input_special_keys() {
     // Escape
     assert_eq!(
         send_input_args(surf, "\u{001b}"),
-        vec!["send-key", "--surface", surf, "escape"]
+        vec!["send-key", "--surface", surf, "--force", "escape"]
     );
 
     // Tab
     assert_eq!(
         send_input_args(surf, "\t"),
-        vec!["send-key", "--surface", surf, "tab"]
+        vec!["send-key", "--surface", surf, "--force", "tab"]
     );
 
     // Up / Down / Right / Left
     assert_eq!(
         send_input_args(surf, "\u{001b}[A"),
-        vec!["send-key", "--surface", surf, "up"]
+        vec!["send-key", "--surface", surf, "--force", "up"]
     );
     assert_eq!(
         send_input_args(surf, "\u{001b}[B"),
-        vec!["send-key", "--surface", surf, "down"]
+        vec!["send-key", "--surface", surf, "--force", "down"]
     );
     assert_eq!(
         send_input_args(surf, "\u{001b}[C"),
-        vec!["send-key", "--surface", surf, "right"]
+        vec!["send-key", "--surface", surf, "--force", "right"]
     );
     assert_eq!(
         send_input_args(surf, "\u{001b}[D"),
-        vec!["send-key", "--surface", surf, "left"]
+        vec!["send-key", "--surface", surf, "--force", "left"]
     );
 
     // Ctrl-C / Ctrl-D
     assert_eq!(
         send_input_args(surf, "\u{0003}"),
-        vec!["send-key", "--surface", surf, "ctrl-c"]
+        vec!["send-key", "--surface", surf, "--force", "ctrl-c"]
     );
     assert_eq!(
         send_input_args(surf, "\u{0004}"),
-        vec!["send-key", "--surface", surf, "ctrl-d"]
+        vec!["send-key", "--surface", surf, "--force", "ctrl-d"]
     );
 
     // Backspace (\x7f and \x08)
     assert_eq!(
         send_input_args(surf, "\u{007f}"),
-        vec!["send-key", "--surface", surf, "backspace"]
+        vec!["send-key", "--surface", surf, "--force", "backspace"]
     );
     assert_eq!(
         send_input_args(surf, "\u{0008}"),
-        vec!["send-key", "--surface", surf, "backspace"]
+        vec!["send-key", "--surface", surf, "--force", "backspace"]
     );
 
     // Enter (\n and \r)
     assert_eq!(
         send_input_args(surf, "\n"),
-        vec!["send-key", "--surface", surf, "enter"]
+        vec!["send-key", "--surface", surf, "--force", "enter"]
     );
     assert_eq!(
         send_input_args(surf, "\r"),
-        vec!["send-key", "--surface", surf, "enter"]
+        vec!["send-key", "--surface", surf, "--force", "enter"]
     );
 
     // Literal text
     assert_eq!(
         send_input_args(surf, "git status"),
-        vec!["send", "--surface", surf, "git status"]
+        vec!["send", "--surface", surf, "--force", "git status"]
     );
+}
+
+#[test]
+fn test_send_input_forces_deliberate_remote_input() {
+    for text in ["x", "\u{001b}[A", "\n"] {
+        let args = send_input_args("surface:99", text);
+        assert!(
+            args.iter().any(|arg| arg == "--force"),
+            "missing --force for {text:?}: {args:?}"
+        );
+    }
 }
 
 #[test]
