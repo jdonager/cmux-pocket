@@ -43,6 +43,20 @@ class SettingsManager(context: Context) {
         get() = prefs.getString(KEY_TERMINAL_BG, "#1E1E1E") ?: "#1E1E1E"
         set(value) = prefs.edit().putString(KEY_TERMINAL_BG, value).apply()
 
+    fun terminalDisplay(host: String, port: Int, surfaceId: String, defaultFontSizeSp: Float): TerminalDisplayPreference =
+        decodeTerminalDisplay(
+            prefs.getString(KEY_TERMINAL_DISPLAY_PREFIX + terminalDisplayKey(host, port, surfaceId), null),
+            defaultFontSizeSp
+        )
+
+    fun saveTerminalDisplay(host: String, port: Int, surfaceId: String, preference: TerminalDisplayPreference) {
+        if (surfaceId.isBlank()) return
+        prefs.edit().putString(
+            KEY_TERMINAL_DISPLAY_PREFIX + terminalDisplayKey(host, port, surfaceId),
+            encodeTerminalDisplay(preference)
+        ).apply()
+    }
+
     var activeProfileId: String?
         get() = prefs.getString(KEY_ACTIVE_PROFILE, null)
         set(value) = prefs.edit().putString(KEY_ACTIVE_PROFILE, value).apply()
@@ -132,6 +146,7 @@ class SettingsManager(context: Context) {
         private const val KEY_FONT_SIZE = "font_size_sp"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_TERMINAL_BG = "terminal_bg"
+        private const val KEY_TERMINAL_DISPLAY_PREFIX = "terminal_display:"
         private const val KEY_PROFILES = "connection_profiles"
         private const val KEY_ACTIVE_PROFILE = "active_profile_id"
     }

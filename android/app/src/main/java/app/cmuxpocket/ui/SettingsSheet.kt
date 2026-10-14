@@ -664,15 +664,15 @@ fun DisplaySection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Font Size", fontSize = 13.sp, color = theme.onSurface)
+                Text("Font Size · This Terminal", fontSize = 13.sp, color = theme.onSurface)
                 Text("${fontSizeSp.toInt()} sp", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = theme.primary)
             }
 
             Slider(
                 value = fontSizeSp,
                 onValueChange = onFontSizeChange,
-                valueRange = 10f..26f,
-                steps = 15,
+                valueRange = 2f..48f,
+                steps = 45,
                 colors = SliderDefaults.colors(
                     thumbColor = theme.primary,
                     activeTrackColor = theme.primary,
