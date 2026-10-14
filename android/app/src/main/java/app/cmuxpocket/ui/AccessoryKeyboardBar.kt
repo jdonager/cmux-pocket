@@ -24,6 +24,9 @@ import androidx.compose.ui.unit.sp
 fun AccessoryKeyboardBar(
     onSendKey: (String) -> Unit,
     onOpenKeyboardPanel: () -> Unit,
+    remoteTakeoverActive: Boolean,
+    onEnableRemoteTakeover: () -> Unit,
+    onDisableRemoteTakeover: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val theme = CmuxTheme.colors
@@ -48,6 +51,28 @@ fun AccessoryKeyboardBar(
                 tint = theme.primary,
                 modifier = Modifier.size(22.dp)
             )
+        }
+
+        VerticalDivider(
+            color = theme.divider,
+            modifier = Modifier
+                .height(24.dp)
+                .padding(horizontal = 4.dp)
+        )
+
+        if (remoteTakeoverActive) {
+            Text(
+                text = "TAKEOVER",
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 11.sp,
+            )
+            TextButton(onClick = onDisableRemoteTakeover) {
+                Text("Stop", fontSize = 11.sp)
+            }
+        } else {
+            TextButton(onClick = onEnableRemoteTakeover) {
+                Text("Take over", fontSize = 11.sp)
+            }
         }
 
         VerticalDivider(

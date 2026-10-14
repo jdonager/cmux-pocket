@@ -12,6 +12,7 @@ import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
@@ -26,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 
 class MainActivity : ComponentActivity() {
@@ -159,6 +161,8 @@ fun CmuxApp(
     val activeWorkspace by viewModel.activeWorkspace.collectAsState()
     val activeSurfaces by viewModel.activeSurfaces.collectAsState()
     val selectedSurfaceId by viewModel.selectedSurfaceId.collectAsState()
+    val remoteTakeoverSurfaceId by viewModel.remoteTakeoverSurfaceId.collectAsState()
+    val remoteTakeoverActive = remoteTakeoverSurfaceId == selectedSurfaceId && selectedSurfaceId != null
 
     val displaySurfaceId = selectedSurfaceId.orEmpty()
     val displayPort = portInput.toIntOrNull() ?: 8088
@@ -187,6 +191,7 @@ fun CmuxApp(
     var showNewSurfaceDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showKeyboardPanel by remember { mutableStateOf(false) }
+    var showRemoteTakeoverConfirm by remember { mutableStateOf(false) }
     var pendingCloseSurface by remember { mutableStateOf<SurfaceInfo?>(null) }
 
     fun requestCloseSurface(surfaceId: String) {
@@ -199,6 +204,22 @@ fun CmuxApp(
     }
     var terminalInputView by remember { mutableStateOf<TerminalInputView?>(null) }
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                terminalInputView?.clearInputTarget()
+                viewModel.clearRemoteTakeover()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(selectedSurfaceId) {
+        terminalInputView?.clearInputTarget()
+    }
 
     // Auto connect on launch with saved configuration
     LaunchedEffect(Unit) {
@@ -245,7 +266,7 @@ fun CmuxApp(
                             onDisplayPreferenceChange = changeTerminalDisplay,
                             themeHex = selectedThemeHex,
                             onTapCanvas = {
-                                terminalInputView?.requestKeyboard()
+                                terminalInputView?.requestKeyboard(selectedSurfaceId)
                             },
                             onTerminalScroll = viewModel::scrollTerminal,
                             onNewSurfaceClick = { showNewSurfaceDialog = true }
@@ -254,7 +275,10 @@ fun CmuxApp(
 
                     AccessoryKeyboardBar(
                         onSendKey = { key -> viewModel.sendInput(key) },
-                        onOpenKeyboardPanel = { showKeyboardPanel = true }
+                        onOpenKeyboardPanel = { showKeyboardPanel = true },
+                        remoteTakeoverActive = remoteTakeoverActive,
+                        onEnableRemoteTakeover = { showRemoteTakeoverConfirm = true },
+                        onDisableRemoteTakeover = viewModel::clearRemoteTakeover,
                     )
                 }
             }
@@ -287,7 +311,10 @@ fun CmuxApp(
                 bottomBar = {
                     AccessoryKeyboardBar(
                         onSendKey = { key -> viewModel.sendInput(key) },
-                        onOpenKeyboardPanel = { showKeyboardPanel = true }
+                        onOpenKeyboardPanel = { showKeyboardPanel = true },
+                        remoteTakeoverActive = remoteTakeoverActive,
+                        onEnableRemoteTakeover = { showRemoteTakeoverConfirm = true },
+                        onDisableRemoteTakeover = viewModel::clearRemoteTakeover,
                     )
                 },
                 containerColor = theme.background
@@ -305,7 +332,7 @@ fun CmuxApp(
                         onDisplayPreferenceChange = changeTerminalDisplay,
                         themeHex = selectedThemeHex,
                         onTapCanvas = {
-                            terminalInputView?.requestKeyboard()
+                            terminalInputView?.requestKeyboard(selectedSurfaceId)
                         },
                         onTerminalScroll = viewModel::scrollTerminal,
                         onNewSurfaceClick = { showNewSurfaceDialog = true }
@@ -316,9 +343,15 @@ fun CmuxApp(
 
         // Single, stable root-level TerminalImeBridge instance
         TerminalImeBridge(
-            onSendText = { text -> viewModel.sendInput(text) },
-            onDelete = { viewModel.sendInput("\u007f") },
-            onEnter = { viewModel.sendInput("\n") },
+            onSendText = { surfaceId, text ->
+                viewModel.sendInput(text, TerminalInputKind.TEXT, surfaceId)
+            },
+            onDelete = { surfaceId ->
+                viewModel.sendInput("\u007f", TerminalInputKind.KEY, surfaceId)
+            },
+            onEnter = { surfaceId ->
+                viewModel.sendInput("\n", TerminalInputKind.KEY, surfaceId)
+            },
             onViewReady = { terminalInputView = it },
             modifier = Modifier.size(1.dp)
         )
@@ -329,6 +362,30 @@ fun CmuxApp(
         ComputerKeyboardPanel(
             onSendKey = { key -> viewModel.sendInput(key) },
             onDismissRequest = { showKeyboardPanel = false }
+        )
+    }
+
+    if (showRemoteTakeoverConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRemoteTakeoverConfirm = false },
+            title = { Text("Enable Remote takeover?") },
+            text = {
+                Text(
+                    "Pocket will send input despite host drafts and permission dialogs for this tab. " +
+                        "It turns off when you leave the tab, disconnect, or background the app."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showRemoteTakeoverConfirm = false
+                        viewModel.enableRemoteTakeover()
+                    }
+                ) { Text("Enable") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoteTakeoverConfirm = false }) { Text("Cancel") }
+            }
         )
     }
 
