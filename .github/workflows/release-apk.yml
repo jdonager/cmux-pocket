@@ -59,14 +59,14 @@ jobs:
           BADGING_TOOL="$ANDROID_HOME/build-tools/35.0.0/aapt2"
           test -f "$APK_PATH"
           "$CERT_TOOL" verify --verbose --print-certs "$APK_PATH"
-          python3 - "$APK_PATH" "$CERT_TOOL" "$BADGING_TOOL" "$GITHUB_OUTPUT" <<'PY'
+          python3 - "$APK_PATH" "$CERT_TOOL" "$BADGING_TOOL" "$GITHUB_REF_NAME" "$GITHUB_OUTPUT" <<'PY'
           import hashlib
           import pathlib
           import re
           import subprocess
           import sys
 
-          apk_path, cert_tool, badging_tool, output_path = sys.argv[1:]
+          apk_path, cert_tool, badging_tool, ref_name, output_path = sys.argv[1:]
           cert_output = subprocess.check_output(
               [cert_tool, "verify", "--print-certs", apk_path],
               text=True,
@@ -96,10 +96,9 @@ jobs:
           package_name, version_code, version_name = package_match.groups()
           if package_name != "app.cmuxpocket":
               raise SystemExit(f"Unexpected application ID: {package_name}")
-          if version_code != "1":
-              raise SystemExit(f"Unexpected versionCode: {version_code}")
-          if version_name != "0.1.0":
-              raise SystemExit(f"Unexpected versionName: {version_name}")
+          tag_version = (sys.argv[4] if len(sys.argv) > 4 else "").lstrip("v")
+          if tag_version and version_name != tag_version:
+              raise SystemExit(f"versionName {version_name} does not match tag {tag_version}")
 
           digest = hashlib.sha256(pathlib.Path(apk_path).read_bytes()).hexdigest()
           with open(output_path, "a", encoding="utf-8") as output:
@@ -122,7 +121,7 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s\n' \
-            "version_name=0.1.0" \
+            "version_name=${{ steps.verify.outputs.version_name }}" \
             "certificate_sha256=$CERTIFICATE_FINGERPRINT" \
             "apk_sha256=$APK_SHA256" \
             > release-metadata.txt

@@ -107,4 +107,4 @@ Unless stated otherwise, the project code is released under the [GNU Affero Gene
 
 The bundled Maple Mono NF font is licensed under the [SIL Open Font License 1.1](LICENSES/MapleMono-OFL-1.1.txt). See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for details.
 
-> **Release signing notice:** `v0.1.0` uses the existing local Android debug keystore for update continuity. This is not a production or app-store signing identity; replace it with a dedicated release keystore before wider distribution.
+> **Release signing notice:** `v0.2.0` uses the existing local Android debug keystore for update continuity. This is not a production or app-store signing identity; replace it with a dedicated release keystore before wider distribution.

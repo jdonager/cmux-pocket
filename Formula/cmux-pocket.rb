@@ -2,7 +2,7 @@ class CmuxPocket < Formula
   desc "Rust Gateway and macOS service manager for cmux Pocket"
   homepage "https://github.com/shiquda/cmux-pocket"
   url "https://github.com/shiquda/cmux-pocket.git", branch: "main"
-  version "0.1.0"
+  version "0.2.0"
   license "AGPL-3.0-or-later"
 
   depends_on "rust" => :build
