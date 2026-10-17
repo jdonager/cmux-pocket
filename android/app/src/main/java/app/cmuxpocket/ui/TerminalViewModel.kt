@@ -64,6 +64,9 @@ class TerminalViewModel : ViewModel() {
     private val _remoteTakeoverSurfaceId = MutableStateFlow<String?>(null)
     val remoteTakeoverSurfaceId: StateFlow<String?> = _remoteTakeoverSurfaceId.asStateFlow()
 
+    private val _hostInputProtectedSurfaceId = MutableStateFlow<String?>(null)
+    val hostInputProtectedSurfaceId: StateFlow<String?> = _hostInputProtectedSurfaceId.asStateFlow()
+
     private val _activeScreenState = MutableStateFlow(TerminalScreenState())
     val activeScreenState: StateFlow<TerminalScreenState> = _activeScreenState.asStateFlow()
 
@@ -174,6 +177,7 @@ class TerminalViewModel : ViewModel() {
             wsClient.statusFlow.collect { status ->
                 if (status != ConnectionStatus.CONNECTED) {
                     clearRemoteTakeover()
+                    _hostInputProtectedSurfaceId.value = null
                 }
                 when (status) {
                     ConnectionStatus.CONNECTING -> {
@@ -218,6 +222,9 @@ class TerminalViewModel : ViewModel() {
             _selectedSurfaceId.collect { surfaceId ->
                 if (_remoteTakeoverSurfaceId.value != surfaceId) {
                     clearRemoteTakeover()
+                }
+                if (_hostInputProtectedSurfaceId.value != surfaceId) {
+                    _hostInputProtectedSurfaceId.value = null
                 }
                 currentScreenCollectorJob?.cancel()
                 if (surfaceId != null) {
@@ -331,6 +338,7 @@ class TerminalViewModel : ViewModel() {
         awaitingReplaySurfaces.clear()
         mutationTracker.clear()
         clearRemoteTakeover()
+        _hostInputProtectedSurfaceId.value = null
     }
 
     private suspend fun refreshWorkspacesInternal(generation: Long = connectionGeneration): List<WorkspaceInfo>? {
@@ -556,6 +564,7 @@ class TerminalViewModel : ViewModel() {
     fun enableRemoteTakeover() {
         val surfaceId = _selectedSurfaceId.value ?: return
         _remoteTakeoverSurfaceId.value = surfaceId
+        _hostInputProtectedSurfaceId.value = null
         _statusMessage.value = "Remote takeover enabled for this tab"
     }
 
@@ -587,6 +596,7 @@ class TerminalViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e(tag, "Failed to send input to surface $surfaceId", e)
                 if (!takeover && _selectedSurfaceId.value == surfaceId) {
+                    _hostInputProtectedSurfaceId.value = surfaceId
                     _statusMessage.value = "Host input is protected. Enable Remote takeover for this tab."
                 } else {
                     _statusMessage.value = "Input failed: ${e.message ?: "gateway unavailable"}"

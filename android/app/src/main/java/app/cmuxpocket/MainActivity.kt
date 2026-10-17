@@ -162,7 +162,9 @@ fun CmuxApp(
     val activeSurfaces by viewModel.activeSurfaces.collectAsState()
     val selectedSurfaceId by viewModel.selectedSurfaceId.collectAsState()
     val remoteTakeoverSurfaceId by viewModel.remoteTakeoverSurfaceId.collectAsState()
+    val hostInputProtectedSurfaceId by viewModel.hostInputProtectedSurfaceId.collectAsState()
     val remoteTakeoverActive = remoteTakeoverSurfaceId == selectedSurfaceId && selectedSurfaceId != null
+    val hostInputProtected = hostInputProtectedSurfaceId == selectedSurfaceId && selectedSurfaceId != null
 
     val displaySurfaceId = selectedSurfaceId.orEmpty()
     val displayPort = portInput.toIntOrNull() ?: 8088
@@ -273,6 +275,9 @@ fun CmuxApp(
                         )
                     }
 
+                    if (hostInputProtected) {
+                        HostInputProtectedBanner()
+                    }
                     AccessoryKeyboardBar(
                         onSendKey = { key -> viewModel.sendInput(key) },
                         onOpenKeyboardPanel = { showKeyboardPanel = true },
@@ -309,13 +314,18 @@ fun CmuxApp(
                     }
                 },
                 bottomBar = {
-                    AccessoryKeyboardBar(
-                        onSendKey = { key -> viewModel.sendInput(key) },
-                        onOpenKeyboardPanel = { showKeyboardPanel = true },
-                        remoteTakeoverActive = remoteTakeoverActive,
-                        onEnableRemoteTakeover = { showRemoteTakeoverConfirm = true },
-                        onDisableRemoteTakeover = viewModel::clearRemoteTakeover,
-                    )
+                    Column {
+                        if (hostInputProtected) {
+                            HostInputProtectedBanner()
+                        }
+                        AccessoryKeyboardBar(
+                            onSendKey = { key -> viewModel.sendInput(key) },
+                            onOpenKeyboardPanel = { showKeyboardPanel = true },
+                            remoteTakeoverActive = remoteTakeoverActive,
+                            onEnableRemoteTakeover = { showRemoteTakeoverConfirm = true },
+                            onDisableRemoteTakeover = viewModel::clearRemoteTakeover,
+                        )
+                    }
                 },
                 containerColor = theme.background
             ) { paddingValues ->
